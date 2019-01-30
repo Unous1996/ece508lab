@@ -3,25 +3,73 @@
 
 #include "helper.hpp"
 
-#define TILE_SIZE 30
-
+#define TILE_SIZE 32
 __global__ void kernel(int *A0, int *Anext, int nx, int ny, int nz) {
 
-  // INSERT KERNEL CODE HERE
-  
+    #define A0(i, j, k) A0[((k)*ny + (j))*nx + (i)]
+    #define Anext(i, j, k) Anext[((k)*ny + (j))*nx + (i)]
 
+    __shared__ int MdA[TILE_SIZE][TILE_SIZE];
+    
+    int tx = threadIdx.x, ty = threadIdx.y, bx = blockIdx.x, by = blockIdx.y;
+
+    int i = bx * TILE_SIZE + tx;
+    int j = by * TILE_SIZE + ty;
+        
+    int bottom, current, top;    
+
+    if(i >= 0 && i < nx && j >= 0 && j < ny){
+        bottom = A0(i, j, 0);
+        current = A0(i, j, 1);
+        top = A0(i, j, 2);
+    }
+
+    MdA[ty][tx] = current;
+    __syncthreads();
+
+     
+    for(int k = 1; k < nz - 1; k++){
+
+      if(i > 0 && i < nx && j > 0 && j < ny){
+          int north, south, west, east;
+          west = (tx > 0) ? MdA[ty][tx-1] : A0(i-1,j,k);
+          east = (tx < TILE_SIZE - 1) ? MdA[ty][tx+1] : A0(i+1,j,k);
+          north = (ty > 0) ? MdA[ty-1][tx] : A0(i,j-1,k);
+          south = (ty < TILE_SIZE - 1) ? MdA[ty+1][tx] : A0(i,j+1,k);
+
+          Anext(i,j,k) = bottom + top + west + east + north + south - 6 * current;  
+          __syncthreads();
+      }
+
+      bottom = current;
+
+      if(i >= 0 && i < nx && j >= 0 && j < ny){
+          MdA[i][j] = top;
+          current = top;
+          top = A0(i,j,k+2);
+      } 
+
+      __syncthreads();
+      
+   }
+
+
+    #undef A0
+    #undef Anext
+    // INSERT KERNEL CODE HERE  
 }
 
 void launchStencil(int* A0, int* Anext, int nx, int ny, int nz) {
-
-  // INSERT CODE HERE
-
+  dim3 dimBlock(TILE_SIZE, TILE_SIZE, 1);
+  dim3 dimGrid(ceil((nx*1.0)/TILE_SIZE),ceil((ny*1.0)/TILE_SIZE),1);
+  kernel<<<dimGrid,dimBlock>>>(A0, Anext, nx, ny, nz);
 }
 
 
 static int eval(const int nx, const int ny, const int nz) {
 
   // Generate model
+  bool debug = false;
   const auto conf_info = std::string("stencil[") + std::to_string(nx) + "," + 
                                                    std::to_string(ny) + "," + 
                                                    std::to_string(nz) + "]";
@@ -30,7 +78,12 @@ static int eval(const int nx, const int ny, const int nz) {
   // generate input data
   timer_start("Generating test data");
   std::vector<int> hostA0(nx * ny * nz);
-  generate_data(hostA0.data(), nx, ny, nz);
+  if(debug == false){
+      generate_data(hostA0.data(), nx, ny, nz);
+  }
+  else{
+      generate_uniform_data(hostA0.data(), nx, ny, nz);
+  }
   std::vector<int> hostAnext(nx * ny * nz);
 
   timer_start("Allocating GPU memory.");
@@ -67,8 +120,6 @@ static int eval(const int nx, const int ny, const int nz) {
 
   return 0;
 }
-
-
 
 TEST_CASE("Convlayer", "[convlayer]") {
 

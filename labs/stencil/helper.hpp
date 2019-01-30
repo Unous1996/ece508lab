@@ -8,7 +8,6 @@
 #include "common/fmt.hpp"
 #include "common/utils.hpp"
 
-
 #include "assert.h"
 #include "stdint.h"
 #include "stdio.h"
@@ -71,7 +70,11 @@ static void generate_data(int *x, const int nx, const int ny, const int nz) {
   delete rng_state;
 }
 
-
+static void generate_uniform_data(int *x, const int nx, const int ny, const int nz){
+  for (size_t ii = 0 ; ii < nx * ny * nz; ++ii) {
+    x[ii] = 1;
+  }
+}
 
 static bool verify(const int *Anext, const int *A0, const int nx, const int ny, const int nz) {
 

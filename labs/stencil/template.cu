@@ -24,31 +24,31 @@ __global__ void kernel(int *A0, int *Anext, int nx, int ny, int nz) {
         top = A0(i, j, 2);
     }
 
-    
     MdA[ty][tx] = current;
     __syncthreads();
 
-    
     for(int k = 1; k < nz - 1; k++){
-
-      if(i > 0 && i < nx && j > 0 && j < ny){
+      
+      if(i > 0 && i < nx-1 && j > 0 && j < ny-1){
           int north, south, west, east;
           west = (tx > 0) ? MdA[ty][tx-1] : A0(i-1,j,k);
           east = (tx < TILE_SIZE - 1) ? MdA[ty][tx+1] : A0(i+1,j,k);
           north = (ty > 0) ? MdA[ty-1][tx] : A0(i,j-1,k);
           south = (ty < TILE_SIZE - 1) ? MdA[ty+1][tx] : A0(i,j+1,k);
           Anext(i,j,k) = bottom + top + west + east + north + south - 6 * current;  
-      }
-
+      }   
       __syncthreads();	
+      
 
       if(i >= 0 && i < nx && j >= 0 && j < ny){
 	  bottom = current;
           MdA[ty][tx] = top;
           current = top;
-          top = A0(i,j,k+2);
+	  if(k+2 < nz){
+              top = A0(i,j,k+2);
+          }
       } 
-
+      
       __syncthreads();
    }
    
@@ -120,6 +120,9 @@ static int eval(const int nx, const int ny, const int nz) {
 
 TEST_CASE("Convlayer", "[convlayer]") {
 
+  SECTION("[dims:512,512,64]") {
+    eval(512,512,64);
+  }
   SECTION("[dims:32,32,32]") {
     eval(32,32,32);
   }
@@ -138,8 +141,6 @@ TEST_CASE("Convlayer", "[convlayer]") {
   SECTION("[dims:1,1,2]") {
     eval(1,1,2);
   }
-  SECTION("[dims:512,512,64]") {
-    eval(512,512,64);
-  }
+
 
 }

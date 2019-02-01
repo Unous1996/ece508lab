@@ -62,7 +62,9 @@ __global__ void kernel(int *A0, int *Anext, int nx, int ny, int nz) {
 void launchStencil(int* A0, int* Anext, int nx, int ny, int nz) {
   dim3 dimBlock(TILE_SIZE, TILE_SIZE, 1);
   dim3 dimGrid(ceil((nx*1.0)/TILE_SIZE),ceil((ny*1.0)/TILE_SIZE),1);
+  INFO("Begin to launch kernel");
   kernel<<<dimGrid,dimBlock>>>(A0, Anext, nx, ny, nz);
+  INFO("Finished launching kernel");
 }
 
 

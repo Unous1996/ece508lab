@@ -5,10 +5,10 @@
 
 #define TILE_SIZE 32
 __global__ void kernel(int *A0, int *Anext, int nx, int ny, int nz) {
-
+    // INSERT KERNEL CODE HERE  
     #define A0(i, j, k) A0[((k)*ny + (j))*nx + (i)]
     #define Anext(i, j, k) Anext[((k)*ny + (j))*nx + (i)]
-
+    
     __shared__ int MdA[TILE_SIZE][TILE_SIZE];
     
     int tx = threadIdx.x, ty = threadIdx.y, bx = blockIdx.x, by = blockIdx.y;
@@ -24,10 +24,11 @@ __global__ void kernel(int *A0, int *Anext, int nx, int ny, int nz) {
         top = A0(i, j, 2);
     }
 
+    
     MdA[ty][tx] = current;
     __syncthreads();
 
-     
+    
     for(int k = 1; k < nz - 1; k++){
 
       if(i > 0 && i < nx && j > 0 && j < ny){
@@ -36,27 +37,23 @@ __global__ void kernel(int *A0, int *Anext, int nx, int ny, int nz) {
           east = (tx < TILE_SIZE - 1) ? MdA[ty][tx+1] : A0(i+1,j,k);
           north = (ty > 0) ? MdA[ty-1][tx] : A0(i,j-1,k);
           south = (ty < TILE_SIZE - 1) ? MdA[ty+1][tx] : A0(i,j+1,k);
-
           Anext(i,j,k) = bottom + top + west + east + north + south - 6 * current;  
-          __syncthreads();
       }
 
-      bottom = current;
+      __syncthreads();	
 
       if(i >= 0 && i < nx && j >= 0 && j < ny){
-          MdA[i][j] = top;
+	  bottom = current;
+          MdA[ty][tx] = top;
           current = top;
           top = A0(i,j,k+2);
       } 
 
       __syncthreads();
-      
    }
-
-
+   
     #undef A0
     #undef Anext
-    // INSERT KERNEL CODE HERE  
 }
 
 void launchStencil(int* A0, int* Anext, int nx, int ny, int nz) {

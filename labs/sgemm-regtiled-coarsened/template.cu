@@ -28,7 +28,52 @@ __global__ void mysgemm(int m, int n, int k, const float *A, const float *B, flo
   #define C(row,col) C[(row) + (col)*m]
 
   // INSERT KERNEL CODE HERE
+  __shared__ float MdB[TILE_SZ_RATIO][TILE_SZ_B];
+  
+  int numOfPhases = ceil((n*1.0)/TILE_SZ_B);
+  int numOfIterations = ceil((k*1.0)/TILE_SZ_RATIO);
+  int bx = blockIdx.x, tx = threadIdx.x;
+  int row = bx * blockDim.x + tx;
 
+  for(int p = 0; p < numOfPhases; p++){
+    float reg[TILE_SZ_RATIO];
+    for(int i = 0; i < numOfIterations; i++){
+      //Load B into the shared memory
+      int shared_row_offset = tx / TILE_SZ_B;
+      int shared_col_offset = tx % TILE_SZ_B;
+      int start_row_B = i * TILE_SZ_RATIO;
+      int start_col_B = p * TILE_SZ_B;
+
+      
+      if(start_row_B + shared_row_offset < k && start_col_B + shared_col_offset < n){
+        MdB[shared_row_offset][shared_col_offset] = B(start_row_B + shared_row_offset,start_col_B + shared_col_offset);
+      }
+      else{
+        MdB[shared_row_offset][shared_col_offset] = 0;
+      }
+
+      for(int j = 0; j < TILE_SZ_RATIO; j++){
+        if(row < m && i * TILE_SZ_RATIO + j < k){
+          reg[j] = A(row, i * TILE_SZ_RATIO + j);
+        }
+        else{
+          reg[j] = 0;
+        }
+      }
+      __syncthreads();
+
+      
+      for(int j = 0; j < TILE_SZ_RATIO; j++){
+        for(int kol = 0; kol < TILE_SZ_B; kol++){
+          if(row < m && start_col_B + kol < n){
+            C(row,start_col_B + kol) += reg[j] * MdB[j][kol]; // kol is a integer between [0,TILE_SZ_B)
+          }
+        }
+      }
+      
+      __syncthreads();
+    }
+  }
 }
 
 void basicSgemm(char transa, char transb, int m, int n, int k, float alpha, const float *A, int lda, const float *B, int ldb, float beta, float *C, int ldc)
@@ -54,12 +99,11 @@ void basicSgemm(char transa, char transb, int m, int n, int k, float alpha, cons
     }
 
     // Initialize thread block and kernel grid dimensions ---------------------
-
+    dim3 dimBlock(TILE_SZ_A, 1, 1);
     //INSERT CODE HERE
-
+    dim3 dimGrid(ceil((m*1.0)/TILE_SZ_A), 1, 1);
     // Invoke CUDA kernel -----------------------------------------------------
-
+    mysgemm<<<dimGrid, dimBlock>>>(m, n, k, A, B, C);
     //INSERT CODE HERE
-
 }
 

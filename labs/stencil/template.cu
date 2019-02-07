@@ -41,10 +41,10 @@ __global__ void kernel(int *A0, int *Anext, int nx, int ny, int nz) {
       
 
       if(i >= 0 && i < nx && j >= 0 && j < ny){
-	  bottom = current;
+	        bottom = current;
           MdA[ty][tx] = top;
           current = top;
-	  if(k+2 < nz){
+	        if(k+2 < nz){
               top = A0(i,j,k+2);
           }
       } 
@@ -73,7 +73,6 @@ static int eval(const int nx, const int ny, const int nz) {
                                                    std::to_string(ny) + "," + 
                                                    std::to_string(nz) + "]";
   INFO("Running "  << conf_info);
-
   // generate input data
   timer_start("Generating test data");
   std::vector<int> hostA0(nx * ny * nz);

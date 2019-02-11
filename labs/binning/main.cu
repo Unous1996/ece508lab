@@ -8,6 +8,15 @@
 __global__ void gpu_normal_kernel(float *in_val, float *in_pos, float *out,
                                   int grid_size, int num_in) {
   //@@ INSERT CODE HERE
+  int tx = threadIdx.x, bx = blockIdx.x;
+  int out_index = bx * blockDim.x + tx;
+  if(out_index < grid_size){
+    for(int i = 0; i < num_in; i++){
+      if(out_index != in_pos[i]){
+        out[out_index] += in_val[i] * in_val[i] / (in_pos[i] - out_index) / (in_pos[i] - out_index);
+      }
+    }
+  }
 }
 
 __global__ void gpu_cutoff_kernel(float *in_val, float *in_pos, float *out,

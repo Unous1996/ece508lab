@@ -18,7 +18,7 @@
 #include <random>
 #include <string>
 #include <vector>
-
+#include <math.h>
 #include <cuda.h>
 
 /// For simplicity, fix #bins=1024 so scan can use a single block and no

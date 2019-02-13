@@ -1,20 +1,19 @@
 #include "helper.hpp"
 
-
 /******************************************************************************
  GPU main computation kernels
 *******************************************************************************/
 
 __global__ void gpu_normal_kernel(float *in_val, float *in_pos, float *out,
                                   int grid_size, int num_in) {
-  //@@ INSERT CODE HERE
+  //@@ INSERT CODE HERE  
   int tx = threadIdx.x, bx = blockIdx.x;
   int out_index = bx * blockDim.x + tx;
   if(out_index < grid_size){
     for(int i = 0; i < num_in; i++){
-      if(out_index != in_pos[i]){
-        out[out_index] += in_val[i] * in_val[i] / (in_pos[i] - out_index) / (in_pos[i] - out_index);
-      }
+      const float dist = in_pos[i] - (float)out_index;
+      const float in_val2 = in_val[i] * in_val[i];
+      out[out_index]+= in_val2 / (dist * dist);
     }
   }
 }
@@ -23,13 +22,64 @@ __global__ void gpu_cutoff_kernel(float *in_val, float *in_pos, float *out,
                                   int grid_size, int num_in,
                                   float cutoff2) {
   //@@ INSERT CODE HERE
+  int tx = threadIdx.x, bx = blockIdx.x;
+  int out_index = bx * blockDim.x + tx;
+  if(out_index < grid_size){
+    for(int i = 0; i < num_in; i++){
+      const float dist = in_pos[i] - (float)out_index;
+      if(dist*dist > cutoff2){
+        continue;
+      }
+      const float in_val2 = in_val[i] * in_val[i];
+      out[out_index]+= in_val2 / (dist * dist);
+    }
+  }
 }
 
 __global__ void gpu_cutoff_binned_kernel(int *bin_ptrs,
                                          float *in_val_sorted,
                                          float *in_pos_sorted, float *out,
-                                         int grid_size, float cutoff2) {
+                                         int grid_size, float cutoff2){
 
+  int tx = threadIdx.x, bx = blockIdx.x;
+  int out_index = bx * blockDim.x + tx;
+
+  float bin_width = (float)grid_size / NUM_BINS;
+
+  int curr_block_start = bx * blockDim.x;
+  float left_bound = (float)curr_block_start - sqrt(cutoff2);
+  
+  if(left_bound < 0){
+    left_bound = 0;
+  }
+
+  int leftmost_bin= left_bound / bin_width;
+  int startindex = bin_ptrs[leftmost_bin];
+ 
+  int curr_block_end = (bx + 1) * blockDim.x - 1;
+  float right_bound = (float)curr_block_end + sqrt(cutoff2);
+  
+  if(right_bound > grid_size){
+    right_bound = grid_size;
+  }
+
+  int rightmost_bin = right_bound / bin_width;
+  if(rightmost_bin + 1 > NUM_BINS){
+    rightmost_bin = NUM_BINS - 1;
+  }
+
+  int endindex = bin_ptrs[rightmost_bin+1];
+  
+  if(out_index < grid_size){
+    for(int i = startindex; i < endindex; i++){
+      const float dist = in_pos_sorted[i] - (float)out_index;
+      if(dist*dist > cutoff2){
+        continue;
+      }
+      const float in_val2 = in_val_sorted[i] * in_val_sorted[i];
+      out[out_index]+= in_val2 / (dist * dist);
+    }
+  }
 //@@ INSERT CODE HERE
 }
 
@@ -44,7 +94,7 @@ void cpu_normal(float *in_val, float *in_pos, float *out, int grid_size,
     const float in_val2 = in_val[inIdx] * in_val[inIdx];
     for (int outIdx = 0; outIdx < grid_size; ++outIdx) {
       const float dist = in_pos[inIdx] - (float)outIdx;
-      out[outIdx] += in_val2 / (dist * dist);
+        out[outIdx] += in_val2 / (dist * dist);  
     }
   }
 }
@@ -112,6 +162,7 @@ static void cpu_preprocess(float *in_val, float *in_pos,
   for (int binIdx = 0; binIdx < NUM_BINS; ++binIdx) {
     bin_counts[binIdx] = 0;
   }
+
   for (int inIdx = 0; inIdx < num_in; ++inIdx) {
     const int binIdx = (int)((in_pos[inIdx] / grid_size) * NUM_BINS);
     ++bin_counts[binIdx];

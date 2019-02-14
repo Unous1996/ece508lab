@@ -209,7 +209,6 @@ __global__ void scan(int *bin_counts, int *bin_ptrs){
     T[tx + NUM_BINS/2] = 0;
   }
   
-  //Scan phase 1
   while(stride < NUM_BINS){
     __syncthreads();
     int index = (tx + 1) * stride * 2 - 1;
@@ -220,7 +219,7 @@ __global__ void scan(int *bin_counts, int *bin_ptrs){
   }
 
   stride = NUM_BINS / 4;
-  //Scan phase 2
+
   while(stride > 0){
     __syncthreads();
     int index = (tx + 1)*stride*2 - 1;
@@ -238,7 +237,8 @@ __global__ void scan(int *bin_counts, int *bin_ptrs){
   if(tx == 0){
     bin_ptrs[tx] = 0;
   }
-  //@@ INSERT CODE HERE
+ 
+
 }
 
 __global__ void sort(float *in_val, float *in_pos, float *in_val_sorted,
@@ -250,16 +250,9 @@ __global__ void sort(float *in_val, float *in_pos, float *in_val_sorted,
 
   if(inIdx < num_in){
     const int binIdx = (int)((in_pos[inIdx] / grid_size) * NUM_BINS);
-    const int newIdx = bin_ptrs[binIdx + 1] - bin_counts[binIdx];
-    atomicSub(&(bin_counts[binIdx]),1);
+    const int newIdx = bin_ptrs[binIdx + 1] - atomicSub(&(bin_counts[binIdx]),1);
     in_val_sorted[newIdx] = in_val[inIdx];
     in_pos_sorted[newIdx] = in_pos[inIdx];
-  }
-
-  if(inIdx == 0){
-    for(int i = 0; i < 60; i++){
-      printf("GPU:in_pos_sorted[%d] = %f\n", i, in_pos_sorted[i]);
-    }
   }
   //@@ INSERT CODE HERE
 }
@@ -274,10 +267,11 @@ static void cpu_preprocess(float *in_val, float *in_pos,
                            int *bin_ptrs) {
 
   // Histogram the input positions
+  
   for (int binIdx = 0; binIdx < NUM_BINS; ++binIdx) {
     bin_counts[binIdx] = 0;
   }
-
+ 
   for (int inIdx = 0; inIdx < num_in; ++inIdx) {
     const int binIdx = (int)((in_pos[inIdx] / grid_size) * NUM_BINS);
     ++bin_counts[binIdx];

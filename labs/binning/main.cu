@@ -80,9 +80,53 @@ __global__ void gpu_cutoff_binned_kernel(int *bin_ptrs,
       out[out_index]+= in_val2 / (dist * dist);
     }
   }
-//@@ INSERT CODE HERE
 }
 
+__global__ void gpu_cutoff_binned_kernel_debug(int *bin_ptrs,
+                                         float *in_val_sorted,
+                                         float *in_pos_sorted, float *out,
+                                         int grid_size, float cutoff2){
+
+  int tx = threadIdx.x, bx = blockIdx.x;
+  int out_index = bx * blockDim.x + tx;
+
+  float bin_width = (float)grid_size / NUM_BINS;
+
+  int curr_block_start = bx * blockDim.x;
+  float left_bound = (float)curr_block_start - sqrt(cutoff2);
+  
+  if(left_bound < 0){
+    left_bound = 0;
+  }
+
+  int leftmost_bin= left_bound / bin_width;
+  int startindex = bin_ptrs[leftmost_bin];
+ 
+  int curr_block_end = (bx + 1) * blockDim.x - 1;
+  float right_bound = (float)curr_block_end + sqrt(cutoff2);
+  
+  if(right_bound > grid_size){
+    right_bound = grid_size;
+  }
+
+  int rightmost_bin = right_bound / bin_width;
+  if(rightmost_bin + 1 > NUM_BINS){
+    rightmost_bin = NUM_BINS - 1;
+  }
+
+  int endindex = bin_ptrs[rightmost_bin+1];
+  
+  if(out_index < grid_size){
+    for(int i = startindex; i < endindex; i++){
+      const float dist = in_pos_sorted[i] - (float)out_index;
+      if(dist*dist > cutoff2){
+        continue;
+      }
+      const float in_val2 = in_val_sorted[i] * in_val_sorted[i];
+      out[out_index]+= in_val2 / (dist * dist);
+    }
+  }
+}
 /******************************************************************************
  Main computation functions
 *******************************************************************************/
@@ -120,10 +164,18 @@ void gpu_cutoff(float *in_val, float *in_pos, float *out, int grid_size,
 void gpu_cutoff_binned(int *bin_ptrs, float *in_val_sorted,
                        float *in_pos_sorted, float *out, int grid_size,
                        float cutoff2) {
-
   const int numThreadsPerBlock = 512;
   const int numBlocks = (grid_size - 1) / numThreadsPerBlock + 1;
   gpu_cutoff_binned_kernel<<<numBlocks, numThreadsPerBlock>>>(
+      bin_ptrs, in_val_sorted, in_pos_sorted, out, grid_size, cutoff2);
+}
+
+void gpu_cutoff_binned_debug(int *bin_ptrs, float *in_val_sorted,
+                       float *in_pos_sorted, float *out, int grid_size,
+                       float cutoff2) {
+  const int numThreadsPerBlock = 512;
+  const int numBlocks = (grid_size - 1) / numThreadsPerBlock + 1;
+  gpu_cutoff_binned_kernel_debug<<<numBlocks, numThreadsPerBlock>>>(
       bin_ptrs, in_val_sorted, in_pos_sorted, out, grid_size, cutoff2);
 }
 
@@ -133,19 +185,82 @@ void gpu_cutoff_binned(int *bin_ptrs, float *in_val_sorted,
 
 __global__ void histogram(float *in_pos, int *bin_counts, int num_in,
                           int grid_size) {
-
   //@@ INSERT CODE HERE
+  int tx = threadIdx.x, bx = blockIdx.x;
+  int inIdx = bx * blockDim.x + tx;
+  if(inIdx < num_in){
+    int binIdx = (int)((in_pos[inIdx] / grid_size) * NUM_BINS);
+    atomicAdd(&(bin_counts[binIdx]),1);
+  }
 }
 
-__global__ void scan(int *bin_counts, int *bin_ptrs) {
+__global__ void scan(int *bin_counts, int *bin_ptrs){
+  
+ __shared__ unsigned int T[NUM_BINS];
+  int stride = 1;
+  int tx = threadIdx.x;
 
+  if(tx < NUM_BINS/2){
+    T[tx] = bin_counts[tx];
+    T[tx + NUM_BINS/2] = bin_counts[tx + NUM_BINS/2];
+  }
+  else{
+    T[tx] = 0;
+    T[tx + NUM_BINS/2] = 0;
+  }
+  
+  //Scan phase 1
+  while(stride < NUM_BINS){
+    __syncthreads();
+    int index = (tx + 1) * stride * 2 - 1;
+    if(index < NUM_BINS && index - stride >= 0){
+      T[index] += T[index - stride];
+    }
+    stride = stride * 2;
+  }
+
+  stride = NUM_BINS / 4;
+  //Scan phase 2
+  while(stride > 0){
+    __syncthreads();
+    int index = (tx + 1)*stride*2 - 1;
+    if((index + stride) < NUM_BINS)
+      T[index + stride] += T[index];
+    stride = stride / 2;
+  }  
+  __syncthreads();
+
+  if(tx < NUM_BINS/2){
+    bin_ptrs[tx + 1] = T[tx];
+    bin_ptrs[tx + 1 + NUM_BINS/2] = T[tx + NUM_BINS/2];
+  }
+
+  if(tx == 0){
+    bin_ptrs[tx] = 0;
+  }
   //@@ INSERT CODE HERE
 }
 
 __global__ void sort(float *in_val, float *in_pos, float *in_val_sorted,
                      float *in_pos_sorted, int grid_size, int num_in,
-                     int *bin_counts, int *bin_ptrs) {
+                     int *bin_counts, int *bin_ptrs){
 
+  int tx = threadIdx.x, bx = blockIdx.x;
+  int inIdx = bx * blockDim.x + tx;
+
+  if(inIdx < num_in){
+    const int binIdx = (int)((in_pos[inIdx] / grid_size) * NUM_BINS);
+    const int newIdx = bin_ptrs[binIdx + 1] - bin_counts[binIdx];
+    atomicSub(&(bin_counts[binIdx]),1);
+    in_val_sorted[newIdx] = in_val[inIdx];
+    in_pos_sorted[newIdx] = in_pos[inIdx];
+  }
+
+  if(inIdx == 0){
+    for(int i = 0; i < 60; i++){
+      printf("GPU:in_pos_sorted[%d] = %f\n", i, in_pos_sorted[i]);
+    }
+  }
   //@@ INSERT CODE HERE
 }
 
@@ -182,6 +297,7 @@ static void cpu_preprocess(float *in_val, float *in_pos,
     in_val_sorted[newIdx] = in_val[inIdx];
     in_pos_sorted[newIdx] = in_pos[inIdx];
   }
+
 }
 
 static void gpu_preprocess(float *in_val, float *in_pos,
@@ -190,16 +306,16 @@ static void gpu_preprocess(float *in_val, float *in_pos,
                            int *bin_ptrs) {
 
   const int numThreadsPerBlock = 512;
-
   // Histogram the input positions
-  histogram<<<30, numThreadsPerBlock>>>(in_pos, bin_counts, num_in,
-                                        grid_size);
+
+  histogram<<<30, numThreadsPerBlock>>>(in_pos, bin_counts, num_in, grid_size);
 
   // Scan the histogram to get the bin pointers
   if (NUM_BINS != 1024) {
     FAIL("NUM_BINS must be 1024. Do not change.");
     return;
   }
+
   scan<<<1, numThreadsPerBlock>>>(bin_counts, bin_ptrs);
 
   // Sort the inputs into the bins
@@ -217,7 +333,6 @@ int eval(const int num_in, const int max, const int grid_size) {
 
   // Initialize host variables
   // ----------------------------------------------
-
   // Variables
   std::vector<float> in_val_h;
   std::vector<float> in_pos_h;
@@ -349,8 +464,10 @@ int eval(const int num_in, const int max, const int grid_size) {
       gpu_cutoff(in_val_d, in_pos_d, out_d, grid_size, num_in, cutoff2);
       break;
     case Mode::GPUBinnedCPUPreprocessing:
-    case Mode::GPUBinnedGPUPreprocessing:
       gpu_cutoff_binned(bin_ptrs_d, in_val_sorted_d, in_pos_sorted_d, out_d, grid_size, cutoff2);
+      break;
+    case Mode::GPUBinnedGPUPreprocessing:
+      gpu_cutoff_binned_debug(bin_ptrs_d, in_val_sorted_d, in_pos_sorted_d, out_d, grid_size, cutoff2);
       break;
     default:
       FAIL("Invalid mode " << (int) mode);

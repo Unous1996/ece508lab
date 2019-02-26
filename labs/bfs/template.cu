@@ -58,8 +58,7 @@ __global__ void gpu_global_queuing_kernel(unsigned int *nodePtrs,
     for (unsigned int nbrIdx = nodePtrs[node]; nbrIdx < nodePtrs[node + 1];
          ++nbrIdx) {
       unsigned int neighbor = nodeNeighbors[nbrIdx];
-      if (!nodeVisited[neighbor]) {
-        nodeVisited[neighbor] = 1;
+      if (atomicAdd(&(nodeVisited[neighbor]),1) == 0) {
         nextLevelNodes[atomicAdd(numNextLevelNodes, 1)] = neighbor; 
       }
     }

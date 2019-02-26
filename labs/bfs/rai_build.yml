@@ -13,4 +13,6 @@ commands:
     - cp -r /src .
     - cmake /src
     - make
-    - ./binning -a
+    - ./bfs gq
+    - ./bfs bq
+    - ./bfs wq

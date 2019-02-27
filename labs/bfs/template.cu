@@ -78,7 +78,42 @@ __global__ void gpu_block_queuing_kernel(unsigned int *nodePtrs,
                                          unsigned int *numCurrLevelNodes,
                                          unsigned int *numNextLevelNodes) {
   // INSERT KERNEL CODE HERE
+  __shared__ unsigned int nextLevelNodes_s[BQ_CAPACITY];    
+  __shared__ unsigned int numNextLevelNodes_s, our_numNextLevelNodes;      
 
+  if(threadIdx.x == 0){
+    numNextLevelNodes_s = 0;    
+  }
+
+  __syncthreads();      
+  const unsigned int tid = blockIdx.x*blockDim.x + threadIdx.x;    
+  if(tid < *numCurrLevelNodes) {         
+    const unsigned int my_vertex = currLevelNodes[tid];         
+    for(unsigned int i = nodePtrs[my_vertex]; i < nodePtrs[my_vertex + 1]; ++i){             
+      const unsigned int was_visited = atomicExch(&(nodeVisited[nodeNeighbors[i]]), 1);             
+      if(!was_visited){                               
+        const unsigned int my_tail = atomicAdd(&numNextLevelNodes_s, 1);                 
+        if(my_tail < BQ_CAPACITY){                     
+          nextLevelNodes_s[my_tail] = nodeNeighbors[i];                 
+        } 
+        else{ // If full, add it to the global queue directly                     
+          numNextLevelNodes_s = BQ_CAPACITY;                     
+          const unsigned int my_global_tail = atomicAdd(numNextLevelNodes, 1);                     
+          nextLevelNodes[my_global_tail] = nodeNeighbors[i];                 
+        }               
+      }         
+    }     
+  }
+       
+  __syncthreads();  
+  if(threadIdx.x == 0) {         
+    our_numNextLevelNodes = atomicAdd(numNextLevelNodes, numNextLevelNodes_s);     
+  }
+
+  __syncthreads();      
+  for(unsigned int i = threadIdx.x; i < numNextLevelNodes_s; i += blockDim.x) {         
+    nextLevelNodes[our_numNextLevelNodes + i] = nextLevelNodes_s[i];     
+  }
   // Initialize shared memory queue
 
   // Loop over all nodes in the curent level

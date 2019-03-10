@@ -57,7 +57,7 @@ uint64_t count_triangles(const pangolin::COOView<uint32_t> view, const int mode)
 
     //@@ launch the linear search kernel here
     dim3 dimBlock(512);
-    dim3 dimGrid(ceil(view.num_rows()/512.0));
+    dim3 dimGrid(ceil(view.nnz()/512.0));
     pangolin::Vector<uint64_t>::Vector TC(view.nnz(),0);
     // dim3 dimGrid (ceil(number of non-zeros / dimBlock.x))
     /*

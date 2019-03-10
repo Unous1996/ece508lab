@@ -12,15 +12,15 @@ __global__ static void kernel_tc(uint64_t *__restrict__ triangleCounts, //!< per
                                  const size_t numEdges                  //!< how many edges to count triangles for
 ) {
   // Determine the source and destination node for the edge
-  unsigned int tx = threadIdx.x, bx = blockIdx.x;
-  unsigned int edgeidx = bx * blockDim.x + tx;
+  size_t tx = threadIdx.x, bx = blockIdx.x;
+  size_t edgeidx = bx * blockDim.x + tx;
   uint64_t result = 0;
   
   if(edgeidx < numEdges){
-    unsigned int startNode = edgeSrc[edgeidx];
-    unsigned int endNode = edgeDst[edgeidx];
-    unsigned int u_ptr = rowPtr[startNode], v_ptr = rowPtr[endNode]; 
-    unsigned int u_end = rowPtr[startNode+1], v_end = rowPtr[endNode+1];
+    uint32_t startNode = edgeSrc[edgeidx];
+    uint32_t endNode = edgeDst[edgeidx];
+    uint32_t u_ptr = rowPtr[startNode], v_ptr = rowPtr[endNode]; 
+    uint32_t u_end = rowPtr[startNode+1], v_end = rowPtr[endNode+1];
     uint32_t w1 = edgeDst[u_ptr], w2 = edgeDst[v_ptr]; 
     while(u_ptr < u_end && v_ptr < v_end){
       if(w1 < w2){

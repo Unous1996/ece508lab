@@ -36,6 +36,34 @@ __device__ void merge_sequential(float* A, int A_len, float* B, int B_len, float
     }
 }
 
+
+__device__ int co_rank(int k, float *A, int m, float *B, int n) {
+    int i = k < m?k:m;
+    int j = k - i;
+    int i_low = 0>(k-n)?0:k-n;
+    int j_low = 0>(k-m)?0:k-m;
+    int delta;
+    bool active=true;
+    while(active){
+        if (i > 0 && j < n && A[i-1] > B[j]){
+            delta = ((i - i_low +1) >> 1);
+            j_low = j;
+            j += delta;
+            i -= delta;
+        }
+        else if(j > 0 && i < m && B[j-1] >= A[i]){
+            delta = ((j - j_low +1) >> 1) ;
+            i_low = i;
+            i = i + delta;
+            j = j - delta;
+        }
+        else{
+            active = false;
+        }
+    }
+    return i;
+}
+
 /*
  * Basic parallel merge kernel using co-rank function
  * A, A_len - input array A and its length
@@ -45,6 +73,14 @@ __device__ void merge_sequential(float* A, int A_len, float* B, int B_len, float
  */
 __global__ void gpu_merge_basic_kernel(float* A, int A_len, float* B, int B_len, float* C) {
     /* Your code here */
+    int tid = blockIdx.x*blockDim.x + threadIdx.x;
+    int m=A_len, n=B_len;
+    int k_curr = tid*ceil_div(m+n,blockDim.x*gridDim.x); // start index of output
+    int k_next = min((tid+1) * ceil_div(m+n,blockDim.x*gridDim.x), m+n); // end index of output
+    int i_curr = co_rank(k_curr, A, m, B, n); 
+    int i_next = co_rank(k_next, A, m, B, n);
+    int j_curr = k_curr - i_curr; int j_next = k_next - i_next;
+    merge_sequential( &A[i_curr], i_next-i_curr, &B[j_curr], j_next-j_curr, &C[k_curr] );
 }
 
 /*
@@ -53,6 +89,7 @@ __global__ void gpu_merge_basic_kernel(float* A, int A_len, float* B, int B_len,
  */
 __global__ void gpu_merge_tiled_kernel(float* A, int A_len, float* B, int B_len, float* C) {
     /* Your code here */
+
 }
 
 /*

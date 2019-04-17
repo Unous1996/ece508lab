@@ -5,7 +5,7 @@
 #include "template.hu"
 
 #define BLOCK_SIZE 512
-#define TILE_SIZE 512
+#define TILE_SIZE 2048
 
 // Ceiling funciton for X / Y.
 __host__ __device__ static inline int ceil_div(int x, int y) {
@@ -75,8 +75,8 @@ __global__ void gpu_merge_basic_kernel(float* A, int A_len, float* B, int B_len,
     /* Your code here */
     int tid = blockIdx.x*blockDim.x + threadIdx.x;
     int m=A_len, n=B_len;
-    int k_curr = tid*ceil_div(m+n,blockDim.x*gridDim.x); // start index of output
-    int k_next = min((tid+1) * ceil_div(m+n,blockDim.x*gridDim.x), m+n); // end index of output
+    int k_curr = tid*ceil_div(m+n,blockDim.x*gridDim.x); 
+    int k_next = min((tid+1) * ceil_div(m+n,blockDim.x*gridDim.x), m+n); 
     int i_curr = co_rank(k_curr, A, m, B, n); 
     int i_next = co_rank(k_next, A, m, B, n);
     int j_curr = k_curr - i_curr; int j_next = k_next - i_next;
@@ -89,6 +89,68 @@ __global__ void gpu_merge_basic_kernel(float* A, int A_len, float* B, int B_len,
  */
 __global__ void gpu_merge_tiled_kernel(float* A, int A_len, float* B, int B_len, float* C) {
     /* Your code here */
+    
+    extern __shared__ float shareAB[];
+    float* A_S = &shareAB[0]; 
+    float* B_S = &shareAB[TILE_SIZE];  
+
+    int m = A_len, n = B_len;  
+
+    int tx = threadIdx.x;
+    int bx = blockIdx.x;
+    
+    int C_curr = bx * ceil_div(m+n,gridDim.x);
+    int C_next = min((bx+1) * ceil_div(m+n, gridDim.x), m+n);
+
+    int A_curr = co_rank(C_curr, A, m, B, n);
+    int B_curr = C_curr - A_curr;
+    int A_next = co_rank(C_next, A, m, B, n);
+    int B_next = C_next - A_next;
+    __syncthreads();
+
+    int counter = 0;
+    int C_length = C_next - C_curr;
+    int A_length = A_next - A_curr;
+    int B_length = B_next - B_curr;
+
+    int total_iteration = ceil_div(C_length, TILE_SIZE); 
+    int C_completed = 0; 
+    int A_consumed = 0;
+    int B_consumed = 0;
+
+    while(counter < total_iteration) {
+
+        for(int i=0; i<TILE_SIZE; i+=blockDim.x){
+            if(i + tx < A_length - A_consumed) {
+                A_S[i + tx] = A[A_curr + A_consumed + i + tx]; 
+            }
+        }
+
+        for(int i=0; i<TILE_SIZE; i+=blockDim.x){
+            if(i + tx < B_length - B_consumed) {
+                B_S[i + tx] = B[B_curr + B_consumed + i + tx]; 
+            }
+        }
+
+        __syncthreads();
+        int c_curr = tx * (TILE_SIZE/blockDim.x); 
+        int c_next = (tx+1) * (TILE_SIZE/blockDim.x);
+    
+        c_curr = c_curr<=(C_length-C_completed)?c_curr:C_length-C_completed;
+        c_next = c_next<=(C_length-C_completed)?c_next:C_length-C_completed;
+
+        int a_curr = co_rank(c_curr, A_S, min(TILE_SIZE, A_length-A_consumed), B_S, min(TILE_SIZE, B_length-B_consumed));
+        int b_curr = c_curr - a_curr;
+        int a_next = co_rank(c_next, A_S, min(TILE_SIZE, A_length-A_consumed), B_S, min(TILE_SIZE, B_length-B_consumed));
+        int b_next = c_next - a_next;
+
+        merge_sequential(&A_S[a_curr], a_next-a_curr, &B_S[b_curr], b_next-b_curr, &C[C_curr+C_completed+c_curr]);
+        counter ++;
+        C_completed += TILE_SIZE;
+        A_consumed += co_rank(TILE_SIZE, A_S, TILE_SIZE, B_S, TILE_SIZE); 
+        B_consumed = C_completed - A_consumed;
+        __syncthreads();
+    }
 
 }
 
@@ -100,6 +162,31 @@ __global__ void gpu_merge_tiled_kernel(float* A, int A_len, float* B, int B_len,
  */
 __global__ void gpu_merge_circular_buffer_kernel(float* A, int A_len, float* B, int B_len, float* C) {
     /* Your code here */
+    /*
+    extern __shared__ float shareAB[];
+    float* A_S = &shareAB[0]; 
+    float* B_S = &shareAB[TILE_SIZE];  
+
+    int tx = threadIdx.x, bx = blockIdx.x;
+
+    int A_S_start = 0;
+    int B_S_start = 0;
+    int A_S_consumed = TILE_SIZE;
+    int B_S_consumed = TILE_SIZE;
+
+    int C_curr = bx * ceil_div(m+n,gridDim.x);
+    int C_next = min((bx+1) * ceil_div(m+n, gridDim.x), m+n);
+
+    int total_iteration = ceil_div(C_length, TILE_SIZE); 
+    int counter = 0;
+    while(counter < total_iteration) {
+        for(int i = 0; i < A_S_consumed; i += blockDim.x){
+            if(i + tx < A_length-A_consumed && i + tx < A_S_consumed){
+
+            }
+        }
+    }
+    */
 }
 
 /******************************************************************************
@@ -113,10 +200,14 @@ void gpu_basic_merge(float* A, int A_len, float* B, int B_len, float* C) {
 
 void gpu_tiled_merge(float* A, int A_len, float* B, int B_len, float* C) {
     const int numBlocks = 128;
-    gpu_merge_tiled_kernel<<<numBlocks, BLOCK_SIZE>>>(A, A_len, B, B_len, C);
+    size_t shemm_size;
+    shemm_size = 2*TILE_SIZE*sizeof(float);
+    gpu_merge_tiled_kernel<<<numBlocks, BLOCK_SIZE, shemm_size>>>(A, A_len, B, B_len, C);
 }
 
 void gpu_circular_buffer_merge(float* A, int A_len, float* B, int B_len, float* C) {
     const int numBlocks = 128;
-    gpu_merge_circular_buffer_kernel<<<numBlocks, BLOCK_SIZE>>>(A, A_len, B, B_len, C);
+    size_t shemm_size;
+    shemm_size = 2*TILE_SIZE*sizeof(float);
+    gpu_merge_circular_buffer_kernel<<<numBlocks, BLOCK_SIZE, shemm_size>>>(A, A_len, B, B_len, C);
 }
